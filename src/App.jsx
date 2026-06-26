@@ -609,6 +609,14 @@ export default function DripPlanner() {
     setMousePos(pt);
     if (!interaction) return;
 
+    if (interaction.type === 'pan-canvas') {
+      const dx = e.clientX - interaction.startClientX;
+      const dy = e.clientY - interaction.startClientY;
+      canvasRef.current.scrollLeft = interaction.startScrollLeft - dx;
+      canvasRef.current.scrollTop = interaction.startScrollTop - dy;
+      return;
+    }
+
     setPlacedComponents(prev => prev.map(c => {
       if (c.uid !== interaction.uid) return c;
       if (interaction.type === 'move-point') {
@@ -647,6 +655,7 @@ export default function DripPlanner() {
 
   // ── Start interactions ─────────────────────────────────
   const startPointMove = (uid) => (e) => {
+    if (e.button !== 0) return; // right/middle click — let canvas handle pan
     e.stopPropagation();
     if (e.shiftKey) { handleShiftClick(uid); return; }
     const comp = placedComponents.find(c => c.uid === uid);
@@ -656,6 +665,7 @@ export default function DripPlanner() {
   };
 
   const startLineMove = (uid) => (e) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     if (e.shiftKey) { handleShiftClick(uid); return; }
     const comp = placedComponents.find(c => c.uid === uid);
@@ -669,12 +679,14 @@ export default function DripPlanner() {
   };
 
   const startEndpointDrag = (uid, end) => (e) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     setInteraction({ type: 'drag-endpoint', uid, end });
     setSelectedUid(uid);
   };
 
   const startAreaMove = (uid) => (e) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     if (e.shiftKey) { handleShiftClick(uid); return; }
     const comp = placedComponents.find(c => c.uid === uid);
@@ -684,6 +696,7 @@ export default function DripPlanner() {
   };
 
   const startAreaResize = (uid, corner) => (e) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     setInteraction({ type: 'resize-area', uid, corner });
     setSelectedUid(uid);
@@ -979,7 +992,7 @@ export default function DripPlanner() {
                 Component Library
               </div>
               <div style={{ fontSize: 11, color: '#7a8694', marginTop: 6, lineHeight: 1.5 }}>
-                Drag onto canvas. <span style={{ color: '#5b8def' }}>Shift-click</span> two components to connect them. Drag endpoints / corners to resize.
+                Drag onto canvas. <span style={{ color: '#5b8def' }}>Shift-click</span> two components to connect. <span style={{ color: '#5b8def' }}>Right-click drag</span> to pan around. Drag endpoints / corners to resize.
               </div>
             </div>
 
@@ -1056,6 +1069,20 @@ export default function DripPlanner() {
                 ref={canvasRef}
                 onDragOver={handleCanvasDragOver}
                 onDrop={handleCanvasDrop}
+                onMouseDown={(e) => {
+                  // Right-click (button 2) or middle-click (button 1) starts panning
+                  if (e.button === 2 || e.button === 1) {
+                    e.preventDefault();
+                    setInteraction({
+                      type: 'pan-canvas',
+                      startClientX: e.clientX,
+                      startClientY: e.clientY,
+                      startScrollLeft: canvasRef.current.scrollLeft,
+                      startScrollTop: canvasRef.current.scrollTop,
+                    });
+                  }
+                }}
+                onContextMenu={(e) => e.preventDefault()}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={handleCanvasMouseUp}
@@ -1070,23 +1097,17 @@ export default function DripPlanner() {
                     linear-gradient(90deg, rgba(91, 141, 239, 0.10) 1px, transparent 1px)
                   `,
                   backgroundSize: `${pxPerFt}px ${pxPerFt}px, ${pxPerFt}px ${pxPerFt}px, ${pxPerFt*5}px ${pxPerFt*5}px, ${pxPerFt*5}px ${pxPerFt*5}px`,
-                  cursor: connectingFrom !== null ? 'crosshair' : 'default',
+                  cursor: interaction?.type === 'pan-canvas' ? 'grabbing' : (connectingFrom !== null ? 'crosshair' : 'default'),
                 }}
                 className="grid-bg"
               >
-                {placedComponents.length === 0 && (
-                  <div style={{
-                    position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', color: '#3a4451',
-                  }}>
-                    <div style={{ fontFamily: 'Fraunces, serif', fontSize: 32, fontWeight: 400, fontStyle: 'italic', marginBottom: 8, color: '#3a4451' }}>
-                      Start with the spigot.
-                    </div>
-                    <div style={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.1em', color: '#2a3441' }}>
-                      DRAG COMPONENTS FROM THE LIBRARY ON THE LEFT
-                    </div>
-                  </div>
-                )}
+                {/* Invisible spacer — ensures the scrollable area is at least 300×300 ft
+                    so panning has somewhere to go even on an empty canvas. */}
+                <div style={{
+                  position: 'absolute', left: 0, top: 0,
+                  width: 300 * pxPerFt, height: 300 * pxPerFt,
+                  pointerEvents: 'none',
+                }} aria-hidden="true"/>
 
                 {/* ── AREAS (bottom layer) ─── */}
                 {placedComponents
@@ -1376,6 +1397,23 @@ export default function DripPlanner() {
                   </div>
                 )}
               </div>
+
+              {/* Empty state — anchored to the visible viewport, not the scrolling canvas */}
+              {placedComponents.length === 0 && (
+                <div style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  pointerEvents: 'none', color: '#3a4451',
+                }}>
+                  <div style={{ fontFamily: 'Fraunces, serif', fontSize: 32, fontWeight: 400, fontStyle: 'italic', marginBottom: 8, color: '#3a4451' }}>
+                    Start with the spigot.
+                  </div>
+                  <div style={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.1em', color: '#2a3441' }}>
+                    DRAG COMPONENTS FROM THE LIBRARY ON THE LEFT
+                  </div>
+                </div>
+              )}
 
               {selectedItem && selectedComp && (
                 <Inspector
